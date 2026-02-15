@@ -1,0 +1,15 @@
+{
+  "log": { "loglevel": "debug" },
+  "inbounds": [
+    {
+      "port": 4444,
+      "protocol": "reflex",
+      "settings": {
+        "clients": [ { "id": "ad806487-2d26-4636-98b6-ab85cc8521f7" } ],
+        "fallback": { "dest": 8080 },
+        "morphing": "youtube"
+      }
+    }
+  ],
+  "outbounds": [ { "protocol": "freedom" } ]
+}

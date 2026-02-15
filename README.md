@@ -1,57 +1,32 @@
-# پروژه Reflex -
+# \# Reflex Protocol Implementation
 
-## چیه این پروژه؟
+# \*\*Name:\*\* Arshia Dehghan
 
-پروژه Reflex یک پروتکل پراکسی جدید برای Xray-Core هست که سعی می‌کنه مشکلات پروتکل‌های قبلی مثل VMess و VLESS رو حل کنه. هدف اصلی اینه که ترافیک پراکسی رو غیرقابل تشخیص کنیم - یعنی سانسورچی نتونه بفهمه که این ترافیک پراکسی هست.
+# \*\*ID:\*\* 401100382
 
-## چیکار باید بکنید؟
+# 
 
-شما باید پروتکل Reflex رو در Xray-Core پیاده‌سازی کنید. این کار در چند مرحله انجام می‌شه:
+# \## Project Status: 100% Complete + Bonus
 
-1. **مرحله 1**: ساختار اولیه پروتکل (پکیج، config، handler اولیه)
-2. **مرحله 2**: پیاده‌سازی handshake و احراز هویت
-3. **مرحله 3**: رمزنگاری و پردازش بسته‌ها
-4. **مرحله 4**: fallback به وب‌سرور (مثل Trojan)
-5. **مرحله 5**: قابلیت‌های پیشرفته (Traffic Morphing و ...)
+# 
 
-## چطوری شروع کنید؟
+# \### Implementation Details
 
-1. اول [راه‌اندازی محیط](docs/setup.md) رو بخونید و Go و Git رو نصب کنید
-2. ریپو Reflex رو کلون کنید (که شامل Xray-Core هست) و بیلد اولیه رو تست کنید
-3. [پروتکل Reflex](docs/protocol.md) رو بخونید تا بفهمید چطوری کار می‌کنه
-4. مرحله به مرحله پیش برید: [Step 1](docs/step1-basic.md) → [Step 2](docs/step2-handshake.md) → [Step 3](docs/step3-encryption.md) → [Step 4](docs/step4-fallback.md) → [Step 5](docs/step5-advanced.md)
-5. [تست کنید](docs/testing.md) که همه چیز درست کار می‌کنه
-6. [تحویل بدید](docs/submission.md) - یک برنچ بسازید و PR بزنید
+# 1\. \*\*Structure (Step 1):\*\* Defined `config.proto` and registered via `infra/conf/xray.go`.
 
-## نمره‌دهی (120 نمره)
+# 2\. \*\*Handshake (Step 2):\*\* Implemented in `inbound.go`. Uses Magic Number check and X25519 key exchange simulation.
 
-### پیاده‌سازی (80 نمره)
-- **Step 1 - Basic Structure**: 10 نمره
-- **Step 2 - Handshake**: 15 نمره
-- **Step 3 - Encryption**: 15 نمره
-- **Step 4 - Fallback**: 15 نمره
-- **Step 5 - Advanced**: 20 نمره (15 نمره اجباری + 5 نمره امتیازی)
+# 3\. \*\*Encryption (Step 3):\*\* ChaCha20-Poly1305 implemented in `Session` struct.
 
-### تست‌ها (20 نمره)
-- تست‌های واحد: 10 نمره
-- تست‌های یکپارچگی: 10 نمره
+# 4\. \*\*Fallback (Step 4):\*\* Uses `bufio.Peek` to distinguish Reflex traffic from HTTP. Validated with browser test.
 
-### کد و مستندات (20 نمره)
-- کیفیت کد و خوانایی: 10 نمره
-- مستندات و کامنت‌ها: 10 نمره
+# 5\. \*\*Traffic Morphing (Step 5 Bonus):\*\* Added `YouTubeProfile` to `inbound.go`. The protocol automatically pads packets to 1400 bytes and adds jitter to mimic video streaming traffic.
 
-جزئیات بیشتر در [فایل تحویل](docs/submission.md) هست.
+# 
 
-## منابع
+# \### How to Run
 
-- [Xray-Core Repository](https://github.com/XTLS/Xray-core)
-- [Go Documentation](https://go.dev/doc/)
-- [Protocol Specification](docs/protocol.md)
+# 1\. Build: `cd xray-core \&\& go build -o xray.exe ./main`
 
-## سوال دارید؟
-
-اگر مشکلی پیش اومد یا سوالی دارید، اول [FAQ](docs/FAQ.md) رو چک کنید. اگر جوابتون رو پیدا نکردید، از من بپرسید
----
-
-**موفق باشید!** 
+# 2\. Run: `.\\xray.exe -config config.json`
 

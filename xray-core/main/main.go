@@ -6,6 +6,8 @@ import (
 
 	"github.com/xtls/xray-core/main/commands/base"
 	_ "github.com/xtls/xray-core/main/distro/all"
+        _ "github.com/xtls/xray-core/proxy/reflex/inbound"
+        _ "github.com/xtls/xray-core/proxy/reflex/outbound"
 )
 
 func main() {
