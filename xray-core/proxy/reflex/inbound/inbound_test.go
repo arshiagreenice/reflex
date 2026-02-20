@@ -3,12 +3,9 @@ package inbound_test
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
-	"io"
 	"testing"
 	"time"
 
-	"github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/proxy/reflex"
 	"github.com/xtls/xray-core/proxy/reflex/inbound"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -56,12 +53,10 @@ func TestSessionEncryptionDecryption(t *testing.T) {
 
 	// Read back requires a reader
 	// Reset session for reading (nonce mismatch otherwise if we use same session object for read/write without care)
-	// For unit test, we use the same session but careful about nonces.
-	// In strict mode, we need separate session objects for client/server.
 	
 	// Let's create a fresh session for reading (Server side simulation)
 	serverSession, _ := inbound.NewSession(key) 
-	
+
 	frame, err := serverSession.ReadFrame(buf)
 	if err != nil {
 		t.Fatalf("ReadFrame failed: %v", err)

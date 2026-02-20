@@ -2,7 +2,6 @@ package inbound
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/cipher"
 	"crypto/rand"
@@ -201,7 +200,7 @@ func (h *Handler) transport(ctx context.Context, s *Session, reader io.Reader, w
 	}
 
 	request := func() error {
-		defer link.Writer.Close()
+		// link.Writer in Xray usually handles cleanup when the pipe breaks or context cancels
 		for {
 			frame, err := s.ReadFrame(reader)
 			if err != nil {
