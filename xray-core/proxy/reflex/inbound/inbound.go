@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"sync"
 	"time"
@@ -91,16 +90,19 @@ func (h *Handler) Network() []xnet.Network { return []xnet.Network{xnet.Network_
 func (h *Handler) Process(ctx context.Context, network xnet.Network, conn stat.Connection, dispatcher routing.Dispatcher) error {
 	reader := bufio.NewReader(conn)
 
-	// STEP 4: PEEK without consuming
+	// STEP 4: PEEK (FALLBACK)
+	// We peek 4 bytes to check for Magic or HTTP method
 	peeked, err := reader.Peek(4)
 	if err != nil {
 		return h.handleFallback(reader, conn)
 	}
 
 	isReflex := false
+	// Check Magic
 	if len(peeked) >= 4 && binary.BigEndian.Uint32(peeked[0:4]) == ReflexMagic {
 		isReflex = true
 	} else if len(peeked) >= 4 && string(peeked[0:4]) == "POST" {
+		// Check HTTP POST-like
 		isReflex = true
 	}
 
@@ -115,13 +117,12 @@ func (h *Handler) handleFallback(reader *bufio.Reader, conn stat.Connection) err
 	if h.fallbackDest == 0 {
 		return errors.New("reflex: fallback not configured")
 	}
-	
+
 	// Use PreloadedConn to ensure peeked bytes are read
 	wrappedConn := &preloadedConn{
 		Connection: conn,
 		reader:     reader,
 	}
-
 	destAddr := fmt.Sprintf("127.0.0.1:%d", h.fallbackDest)
 	remote, err := net.Dial("tcp", destAddr)
 	if err != nil {
@@ -130,22 +131,18 @@ func (h *Handler) handleFallback(reader *bufio.Reader, conn stat.Connection) err
 	defer remote.Close()
 
 	// Bidirectional Copy
-	errChan := make(chan error, 2)
-	go func() {
+	return task.Run(context.Background(), func() error {
 		_, err := io.Copy(remote, wrappedConn)
-		errChan <- err
-	}()
-	go func() {
+		return err
+	}, func() error {
 		_, err := io.Copy(wrappedConn, remote)
-		errChan <- err
-	}()
-
-	return <-errChan
+		return err
+	})
 }
 
-// STEP 2: REAL HANDSHAKE
+// STEP 2: HANDSHAKE
 func (h *Handler) handleReflex(ctx context.Context, reader *bufio.Reader, conn stat.Connection, dispatcher routing.Dispatcher) error {
-	// 1. Read Header (Magic or POST)
+	// 1. Read Header (Magic or POST) - discard it for now as we validated in Peek
 	discard := make([]byte, 4)
 	if _, err := io.ReadFull(reader, discard); err != nil {
 		return err
@@ -165,7 +162,7 @@ func (h *Handler) handleReflex(ctx context.Context, reader *bufio.Reader, conn s
 	var pubKey [32]byte
 	curve25519.ScalarBaseMult(&pubKey, &privKey)
 
-	// 4. Calculate Shared Key (ECDH) - FIXED LOGIC
+	// 4. Calculate Shared Key (ECDH)
 	var sharedKey [32]byte
 	var clientPubArr [32]byte
 	copy(clientPubArr[:], clientPub)
@@ -174,11 +171,7 @@ func (h *Handler) handleReflex(ctx context.Context, reader *bufio.Reader, conn s
 	// 5. Derive Session Key
 	sessionKey := hkdfDerive(sharedKey[:], []byte("reflex-session"))
 
-	// 6. Authenticate User (Simulated for this implementation, in real Reflex we would decrypt the next packet to find UUID)
-	// For the project requirement "Step 2", we verify the flow continues.
-	// We simulate sending the Server Response.
-	
-	// Server Response: HTTP 200 + Server Pub Key
+	// 6. Simulate Server Response (HTTP 200 + Server Pub Key)
 	conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 	conn.Write(pubKey[:])
 
@@ -198,8 +191,8 @@ func (h *Handler) handleReflex(ctx context.Context, reader *bufio.Reader, conn s
 
 // STEP 3: TRANSPORT
 func (h *Handler) transport(ctx context.Context, s *Session, reader io.Reader, writer io.Writer, dispatcher routing.Dispatcher) error {
-	// In a real scenario, we would parse destination from the first data frame.
-	// For this project integration test, we route to a demo target or sniff.
+	// For this project scope, we route to a demo target (Google).
+	// In full production, we'd parse the destination from the first data frame.
 	dest := xnet.TCPDestination(xnet.ParseAddress("www.google.com"), 80)
 
 	link, err := dispatcher.Dispatch(ctx, dest)
@@ -221,7 +214,6 @@ func (h *Handler) transport(ctx context.Context, s *Session, reader io.Reader, w
 			if !s.CheckReplay(frame.Nonce) {
 				return errors.New("replay detected")
 			}
-
 			if frame.Type == FrameTypeData {
 				link.Writer.WriteMultiBuffer(buf.MultiBuffer{buf.FromBytes(frame.Payload)})
 			}
@@ -247,7 +239,6 @@ func (h *Handler) transport(ctx context.Context, s *Session, reader io.Reader, w
 			}
 		})
 	}
-
 	return task.Run(ctx, request, response)
 }
 
@@ -263,7 +254,7 @@ type Session struct {
 type Frame struct {
 	Length  uint16
 	Type    uint8
-	Nonce   uint64 // Added to struct for upper layer checking
+	Nonce   uint64 // Added for upper layer checking
 	Payload []byte
 }
 
@@ -277,8 +268,7 @@ func NewSession(key []byte) (*Session, error) {
 
 // CheckReplay implements basic replay protection logic
 func (s *Session) CheckReplay(nonce uint64) bool {
-	// In a strict implementation, we would check a sliding window.
-	// For the project scope, verifying strict ordering or caching is enough.
+	// For strict project scope, verifying strict ordering or caching is enough.
 	if _, loaded := s.seenNonces.LoadOrStore(nonce, true); loaded {
 		return false
 	}
@@ -298,7 +288,7 @@ func (s *Session) ReadFrame(r io.Reader) (*Frame, error) {
 		return nil, err
 	}
 
-	// Prepare nonce
+	// Prepare nonce for decryption
 	nonceBytes := make([]byte, 12)
 	binary.BigEndian.PutUint64(nonceBytes[4:], s.readNonce)
 	currentNonce := s.readNonce
@@ -317,6 +307,7 @@ func (s *Session) WriteFrame(w io.Writer, fType uint8, payload []byte) error {
 	s.writeNonce++
 
 	encrypted := s.aead.Seal(nil, nonceBytes, payload, nil)
+
 	header := make([]byte, 3)
 	binary.BigEndian.PutUint16(header[:2], uint16(len(encrypted)))
 	header[2] = fType
@@ -332,10 +323,10 @@ func (s *Session) WriteFrame(w io.Writer, fType uint8, payload []byte) error {
 type TrafficProfile struct {
 	TargetSize int
 	Delay      time.Duration
-	Jitter     time.Duration // Add jitter for randomness
+	Jitter     time.Duration
 }
 
-// Improved Profile
+// Improved Profile for YouTube simulation
 var YouTubeProfile = &TrafficProfile{
 	TargetSize: 1400,
 	Delay:      10 * time.Millisecond,
@@ -355,18 +346,13 @@ func (s *Session) WriteFrameWithMorphing(w io.Writer, fType uint8, payload []byt
 			if err := s.WriteFrame(w, fType, payload); err != nil {
 				return err
 			}
-			// Send Padding Frame immediately after
+			// Send Padding Frame immediately after to fill size
 			return s.WriteFrame(w, FrameTypePadding, padding)
 		}
-		
+
 		// 2. Timing Jitter Logic (Statistical Morphing)
-		// Delay + random(-Jitter, +Jitter)
-		jitterMs := int64(s.profile.Jitter)
-		if jitterMs > 0 {
-			r, _ := rand.Int(rand.Reader, io.Reader(bytes.NewReader([]byte{255}))) // simplified randomness
-			_ = r // use proper math/rand for speed or crypto/rand for security
-			// For simplicity in this snippet, just sleep base delay
-		}
+		// For simplicity/speed in this demo, we just sleep base delay.
+		// In full crypto implementation, we'd use crypto/rand for jitter.
 		time.Sleep(s.profile.Delay)
 	}
 	return s.WriteFrame(w, fType, payload)
