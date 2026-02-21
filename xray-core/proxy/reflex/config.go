@@ -1,4 +1,4 @@
-﻿package reflex
+package reflex
 
 type User struct {
     Id     string 
