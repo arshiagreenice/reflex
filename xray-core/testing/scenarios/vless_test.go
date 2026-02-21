@@ -97,7 +97,7 @@ func TestVless(t *testing.T) {
 					Vnext: &protocol.ServerEndpoint{
 						Address: net.NewIPOrDomain(net.LocalHostIP),
 						Port:    uint32(serverPort),
-						User:    &protocol.User{
+						User: &protocol.User{
 							Account: serial.ToTypedMessage(&vless.Account{
 								Id: userID.String(),
 							}),
@@ -198,7 +198,7 @@ func TestVlessTls(t *testing.T) {
 					Vnext: &protocol.ServerEndpoint{
 						Address: net.NewIPOrDomain(net.LocalHostIP),
 						Port:    uint32(serverPort),
-						User:    &protocol.User{
+						User: &protocol.User{
 							Account: serial.ToTypedMessage(&vless.Account{
 								Id: userID.String(),
 							}),
@@ -317,7 +317,7 @@ func TestVlessXtlsVision(t *testing.T) {
 					Vnext: &protocol.ServerEndpoint{
 						Address: net.NewIPOrDomain(net.LocalHostIP),
 						Port:    uint32(serverPort),
-						User:    &protocol.User{
+						User: &protocol.User{
 							Account: serial.ToTypedMessage(&vless.Account{
 								Id:   userID.String(),
 								Flow: vless.XRV,
@@ -447,7 +447,7 @@ func TestVlessXtlsVisionReality(t *testing.T) {
 					Vnext: &protocol.ServerEndpoint{
 						Address: net.NewIPOrDomain(net.LocalHostIP),
 						Port:    uint32(serverPort),
-						User:    &protocol.User{
+						User: &protocol.User{
 							Account: serial.ToTypedMessage(&vless.Account{
 								Id:   userID.String(),
 								Flow: vless.XRV,

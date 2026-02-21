@@ -31,10 +31,10 @@ type Server struct {
 }
 
 type routingInfo struct {
-	ctx         context.Context
-	dispatcher  routing.Dispatcher
-	inboundTag  *session.Inbound
-	contentTag  *session.Content
+	ctx        context.Context
+	dispatcher routing.Dispatcher
+	inboundTag *session.Inbound
+	contentTag *session.Content
 }
 
 func NewServer(ctx context.Context, conf *DeviceConfig) (*Server, error) {

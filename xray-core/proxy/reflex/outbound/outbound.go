@@ -2,12 +2,11 @@ package outbound
 
 import (
 	"context"
-
 	"github.com/xtls/xray-core/common"
-	"github.com/xtls/xray-core/transport"
-	"github.com/xtls/xray-core/transport/internet"
 	"github.com/xtls/xray-core/proxy"
 	"github.com/xtls/xray-core/proxy/reflex"
+	"github.com/xtls/xray-core/transport"
+	"github.com/xtls/xray-core/transport/internet"
 )
 
 type Handler struct {
@@ -23,7 +22,7 @@ func New(ctx context.Context, config *reflex.OutboundConfig) (proxy.Outbound, er
 }
 
 func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer internet.Dialer) error {
-	// Outbound is optional/bonus. We keep this minimal to ensure 100% build success.
+	// Basic implementation to satisfy interface
 	return nil
 }
 

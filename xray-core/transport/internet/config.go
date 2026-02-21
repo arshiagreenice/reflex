@@ -130,7 +130,7 @@ func (s DomainStrategy) FallbackIP6() bool {
 }
 
 func (s DomainStrategy) GetDynamicStrategy(addrFamily net.AddressFamily) DomainStrategy {
-	if  addrFamily.IsDomain(){
+	if addrFamily.IsDomain() {
 		return s
 	}
 	switch s {

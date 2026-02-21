@@ -255,7 +255,7 @@ func (v *ShadowsocksClientConfig) Build() (proto.Message, error) {
 		ss := &protocol.ServerEndpoint{
 			Address: server.Address.Build(),
 			Port:    uint32(server.Port),
-			User:    &protocol.User{
+			User: &protocol.User{
 				Level:   uint32(server.Level),
 				Email:   server.Email,
 				Account: serial.ToTypedMessage(account),

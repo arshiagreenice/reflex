@@ -51,8 +51,8 @@ type HTTPRemoteConfig struct {
 }
 
 type HTTPClientConfig struct {
-	Address  *Address          	 `json:"address"`
-	Port     uint16            	 `json:"port"`
+	Address  *Address            `json:"address"`
+	Port     uint16              `json:"port"`
 	Level    uint32              `json:"level"`
 	Email    string              `json:"email"`
 	Username string              `json:"user"`
