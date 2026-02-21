@@ -1,0 +1,24 @@
+﻿{
+  "inbounds": [
+    {
+      "port": 443,
+      "protocol": "reflex",
+      "settings": {
+        "clients": [
+          {
+            "id": "12345678-1234-1234-1234-123456789012",
+            "policy": "youtube"
+          }
+        ],
+        "fallback": {
+          "dest": 80
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom"
+    }
+  ]
+}

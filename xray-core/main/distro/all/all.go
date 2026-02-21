@@ -1,4 +1,4 @@
-package all
+﻿package all
 
 import (
 	// The following are necessary as they register handlers in their init functions.
@@ -65,11 +65,6 @@ import (
 	// Transport headers
 	_ "github.com/xtls/xray-core/transport/internet/headers/http"
 	_ "github.com/xtls/xray-core/transport/internet/headers/noop"
-	_ "github.com/xtls/xray-core/transport/internet/headers/srtp"
-	_ "github.com/xtls/xray-core/transport/internet/headers/tls"
-	_ "github.com/xtls/xray-core/transport/internet/headers/utp"
-	_ "github.com/xtls/xray-core/transport/internet/headers/wechat"
-	_ "github.com/xtls/xray-core/transport/internet/headers/wireguard"
 
 	// JSON & TOML & YAML
 	_ "github.com/xtls/xray-core/main/json"
@@ -82,3 +77,4 @@ import (
 	// Commands
 	_ "github.com/xtls/xray-core/main/commands/all"
 )
+

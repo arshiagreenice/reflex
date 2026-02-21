@@ -2,8 +2,11 @@ package router
 
 import (
 	"context"
+	"io"
 	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/xtls/xray-core/common/errors"
@@ -50,12 +53,40 @@ var matcherTypeMap = map[Domain_Type]strmatcher.Type{
 }
 
 type DomainMatcher struct {
-	matchers strmatcher.IndexMatcher
+	Matchers strmatcher.IndexMatcher
+}
+
+func SerializeDomainMatcher(domains []*Domain, w io.Writer) error {
+
+	g := strmatcher.NewMphMatcherGroup()
+	for _, d := range domains {
+		matcherType, f := matcherTypeMap[d.Type]
+		if !f {
+			continue
+		}
+
+		_, err := g.AddPattern(d.Value, matcherType)
+		if err != nil {
+			return err
+		}
+	}
+	g.Build()
+	// serialize
+	return g.Serialize(w)
+}
+
+func NewDomainMatcherFromBuffer(data []byte) (*strmatcher.MphMatcherGroup, error) {
+	matcher, err := strmatcher.NewMphMatcherGroupFromBuffer(data)
+	if err != nil {
+		return nil, err
+	}
+	return matcher, nil
 }
 
 func NewMphMatcherGroup(domains []*Domain) (*DomainMatcher, error) {
 	g := strmatcher.NewMphMatcherGroup()
-	for _, d := range domains {
+	for i, d := range domains {
+		domains[i] = nil
 		matcherType, f := matcherTypeMap[d.Type]
 		if !f {
 			errors.LogError(context.Background(), "ignore unsupported domain type ", d.Type, " of rule ", d.Value)
@@ -69,12 +100,12 @@ func NewMphMatcherGroup(domains []*Domain) (*DomainMatcher, error) {
 	}
 	g.Build()
 	return &DomainMatcher{
-		matchers: g,
+		Matchers: g,
 	}, nil
 }
 
 func (m *DomainMatcher) ApplyDomain(domain string) bool {
-	return len(m.matchers.Match(strings.ToLower(domain))) > 0
+	return len(m.Matchers.Match(strings.ToLower(domain))) > 0
 }
 
 // Apply implements Condition.
@@ -307,53 +338,58 @@ func (m *AttributeMatcher) Apply(ctx routing.Context) bool {
 	return m.Match(attributes)
 }
 
-// Geo attribute
-type GeoAttributeMatcher interface {
-	Match(*Domain) bool
-}
-
-type GeoBooleanMatcher string
-
-func (m GeoBooleanMatcher) Match(domain *Domain) bool {
-	for _, attr := range domain.Attribute {
-		if attr.Key == string(m) {
-			return true
-		}
-	}
-	return false
-}
-
-type GeoAttributeList struct {
-	Matcher []GeoAttributeMatcher
-}
-
-func (al *GeoAttributeList) Match(domain *Domain) bool {
-	for _, matcher := range al.Matcher {
-		if !matcher.Match(domain) {
-			return false
-		}
-	}
-	return true
-}
-
-func (al *GeoAttributeList) IsEmpty() bool {
-	return len(al.Matcher) == 0
-}
-
-func ParseAttrs(attrs []string) *GeoAttributeList {
-	al := new(GeoAttributeList)
-	for _, attr := range attrs {
-		lc := strings.ToLower(attr)
-		al.Matcher = append(al.Matcher, GeoBooleanMatcher(lc))
-	}
-	return al
-}
-
 type ProcessNameMatcher struct {
-	names []string
+	ProcessNames  []string
+	AbsPaths      []string
+	Folders       []string
+	MatchXraySelf bool
+}
+
+func NewProcessNameMatcher(names []string) *ProcessNameMatcher {
+	processNames := []string{}
+	folders := []string{}
+	absPaths := []string{}
+	matchXraySelf := false
+	for _, name := range names {
+		if name == "self/" {
+			matchXraySelf = true
+			continue
+		}
+		// replace xray/ with self executable path
+		if name == "xray/" {
+			xrayPath, err := os.Executable()
+			if err != nil {
+				errors.LogError(context.Background(), "Failed to get xray executable path: ", err)
+				continue
+			}
+			name = xrayPath
+		}
+		name := filepath.ToSlash(name)
+		// /usr/bin/
+		if strings.HasSuffix(name, "/") {
+			folders = append(folders, name)
+			continue
+		}
+		// /usr/bin/curl
+		if strings.Contains(name, "/") {
+			absPaths = append(absPaths, name)
+			continue
+		}
+		// curl.exe or curl
+		processNames = append(processNames, strings.TrimSuffix(name, ".exe"))
+	}
+	return &ProcessNameMatcher{
+		ProcessNames:  processNames,
+		AbsPaths:      absPaths,
+		Folders:       folders,
+		MatchXraySelf: matchXraySelf,
+	}
 }
 
 func (m *ProcessNameMatcher) Apply(ctx routing.Context) bool {
+	if len(ctx.GetSourceIPs()) == 0 {
+		return false
+	}
 	srcPort := ctx.GetSourcePort().String()
 	srcIP := ctx.GetSourceIPs()[0].String()
 	var network string
@@ -369,18 +405,26 @@ func (m *ProcessNameMatcher) Apply(ctx routing.Context) bool {
 	if err != nil {
 		return false
 	}
-	pid, name, err := net.FindProcess(src)
+	pid, name, absPath, err := net.FindProcess(src)
 	if err != nil {
 		if err != net.ErrNotLocal {
 			errors.LogError(context.Background(), "Unables to find local process name: ", err)
 		}
 		return false
 	}
-	for _, n := range m.names {
-		if name == "/self" && pid == os.Getpid() {
+	if m.MatchXraySelf {
+		if pid == os.Getpid() {
 			return true
 		}
-		if n == name {
+	}
+	if slices.Contains(m.ProcessNames, name) {
+		return true
+	}
+	if slices.Contains(m.AbsPaths, absPath) {
+		return true
+	}
+	for _, f := range m.Folders {
+		if strings.HasPrefix(absPath, f) {
 			return true
 		}
 	}

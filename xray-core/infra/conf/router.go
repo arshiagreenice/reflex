@@ -1,7 +1,10 @@
 package conf
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
+	"io"
 	"runtime"
 	"strconv"
 	"strings"
@@ -9,6 +12,7 @@ import (
 	"github.com/xtls/xray-core/app/router"
 	"github.com/xtls/xray-core/common/errors"
 	"github.com/xtls/xray-core/common/net"
+	"github.com/xtls/xray-core/common/platform"
 	"github.com/xtls/xray-core/common/platform/filesystem"
 	"github.com/xtls/xray-core/common/serial"
 	"google.golang.org/protobuf/proto"
@@ -102,7 +106,7 @@ func (c *RouterConfig) Build() (*router.Config, error) {
 	}
 
 	for _, rawRule := range rawRuleList {
-		rule, err := ParseRule(rawRule)
+		rule, err := parseRule(rawRule)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +129,7 @@ type RouterRule struct {
 	BalancerTag string `json:"balancerTag"`
 }
 
-func ParseIP(s string) (*router.CIDR, error) {
+func parseIP(s string) (*router.CIDR, error) {
 	var addr, mask string
 	i := strings.Index(s, "/")
 	if i < 0 {
@@ -173,91 +177,168 @@ func ParseIP(s string) (*router.CIDR, error) {
 	}
 }
 
-func loadGeoIP(code string) ([]*router.CIDR, error) {
-	return loadIP("geoip.dat", code)
-}
-
-var (
-	FileCache = make(map[string][]byte)
-	IPCache   = make(map[string]*router.GeoIP)
-	SiteCache = make(map[string]*router.GeoSite)
-)
-
-func loadFile(file string) ([]byte, error) {
-	if FileCache[file] == nil {
-		bs, err := filesystem.ReadAsset(file)
-		if err != nil {
-			return nil, errors.New("failed to open file: ", file).Base(err)
-		}
-		if len(bs) == 0 {
-			return nil, errors.New("empty file: ", file)
-		}
-		// Do not cache file, may save RAM when there
-		// are many files, but consume CPU each time.
-		return bs, nil
-		FileCache[file] = bs
+func loadFile(file, code string) ([]byte, error) {
+	runtime.GC()
+	r, err := filesystem.OpenAsset(file)
+	defer r.Close()
+	if err != nil {
+		return nil, errors.New("failed to open file: ", file).Base(err)
 	}
-	return FileCache[file], nil
+	bs := find(r, []byte(code))
+	if bs == nil {
+		return nil, errors.New("code not found in ", file, ": ", code)
+	}
+	return bs, nil
 }
 
 func loadIP(file, code string) ([]*router.CIDR, error) {
-	index := file + ":" + code
-	if IPCache[index] == nil {
-		var geoip router.GeoIP
-
-		if runtime.GOOS != "windows" && runtime.GOOS != "wasm" {
-			// dont pass code becuase we have country code in top level router.GeoIP
-			geoip = router.GeoIP{Cidr: []*router.CIDR{}}
-		} else {
-			bs, err := loadFile(file)
-			if err != nil {
-				return nil, errors.New("failed to load file: ", file).Base(err)
-			}
-			bs = filesystem.Find(bs, []byte(code))
-			if bs == nil {
-				return nil, errors.New("code not found in ", file, ": ", code)
-			}
-			if err := proto.Unmarshal(bs, &geoip); err != nil {
-				return nil, errors.New("error unmarshal IP in ", file, ": ", code).Base(err)
-			}
-		}
-		defer runtime.GC()     // or debug.FreeOSMemory()
-		return geoip.Cidr, nil // do not cache geoip
-		IPCache[index] = &geoip
+	bs, err := loadFile(file, code)
+	if err != nil {
+		return nil, err
 	}
-	return IPCache[index].Cidr, nil
+	var geoip router.GeoIP
+	if err := proto.Unmarshal(bs, &geoip); err != nil {
+		return nil, errors.New("error unmarshal IP in ", file, ": ", code).Base(err)
+	}
+	defer runtime.GC() // or debug.FreeOSMemory()
+	return geoip.Cidr, nil
 }
 
 func loadSite(file, code string) ([]*router.Domain, error) {
-	index := file + ":" + code
-	if SiteCache[index] == nil {
-		var geosite router.GeoSite
 
-		if runtime.GOOS != "windows" && runtime.GOOS != "wasm" {
-			// pass file:code so can build optimized matcher later
-			domain := router.Domain{Value: file + "_" + code}
-			geosite = router.GeoSite{Domain: []*router.Domain{&domain}}
+	// Check if domain matcher cache is provided via environment
+	domainMatcherPath := platform.NewEnvFlag(platform.MphCachePath).GetValue(func() string { return "" })
+	if domainMatcherPath != "" {
+		return []*router.Domain{{}}, nil
+	}
 
-		} else {
+	bs, err := loadFile(file, code)
+	if err != nil {
+		return nil, err
+	}
+	var geosite router.GeoSite
+	if err := proto.Unmarshal(bs, &geosite); err != nil {
+		return nil, errors.New("error unmarshal Site in ", file, ": ", code).Base(err)
+	}
+	defer runtime.GC() // or debug.FreeOSMemory()
+	return geosite.Domain, nil
+}
 
-			bs, err := loadFile(file)
-			if err != nil {
-				return nil, errors.New("failed to load file: ", file).Base(err)
-			}
-			bs = filesystem.Find(bs, []byte(code))
-			if bs == nil {
-				return nil, errors.New("list not found in ", file, ": ", code)
-			}
-			if err := proto.Unmarshal(bs, &geosite); err != nil {
-				return nil, errors.New("error unmarshal Site in ", file, ": ", code).Base(err)
+func decodeVarint(r *bufio.Reader) (uint64, error) {
+	var x uint64
+	for shift := uint(0); shift < 64; shift += 7 {
+		b, err := r.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+		x |= (uint64(b) & 0x7F) << shift
+		if (b & 0x80) == 0 {
+			return x, nil
+		}
+	}
+	// The number is too large to represent in a 64-bit value.
+	return 0, errors.New("varint overflow")
+}
+
+func find(r io.Reader, code []byte) []byte {
+	codeL := len(code)
+	if codeL == 0 {
+		return nil
+	}
+
+	br := bufio.NewReaderSize(r, 64*1024)
+	need := 2 + codeL
+	prefixBuf := make([]byte, need)
+
+	for {
+		if _, err := br.ReadByte(); err != nil {
+			return nil
+		}
+
+		x, err := decodeVarint(br)
+		if err != nil {
+			return nil
+		}
+		bodyL := int(x)
+		if bodyL <= 0 {
+			return nil
+		}
+
+		prefixL := bodyL
+		if prefixL > need {
+			prefixL = need
+		}
+		prefix := prefixBuf[:prefixL]
+		if _, err := io.ReadFull(br, prefix); err != nil {
+			return nil
+		}
+
+		match := false
+		if bodyL >= need {
+			if int(prefix[1]) == codeL && bytes.Equal(prefix[2:need], code) {
+				match = true
 			}
 		}
 
-		defer runtime.GC()         // or debug.FreeOSMemory()
-		return geosite.Domain, nil // do not cache geosite
-		SiteCache[index] = &geosite
+		remain := bodyL - prefixL
+		if match {
+			out := make([]byte, bodyL)
+			copy(out, prefix)
+			if remain > 0 {
+				if _, err := io.ReadFull(br, out[prefixL:]); err != nil {
+					return nil
+				}
+			}
+			return out
+		}
+
+		if remain > 0 {
+			if _, err := br.Discard(remain); err != nil {
+				return nil
+			}
+		}
 	}
-	return SiteCache[index].Domain, nil
+}
+
+type AttributeMatcher interface {
+	Match(*router.Domain) bool
+}
+
+type BooleanMatcher string
+
+func (m BooleanMatcher) Match(domain *router.Domain) bool {
+	for _, attr := range domain.Attribute {
+		if attr.Key == string(m) {
+			return true
+		}
+	}
+	return false
+}
+
+type AttributeList struct {
+	matcher []AttributeMatcher
+}
+
+func (al *AttributeList) Match(domain *router.Domain) bool {
+	for _, matcher := range al.matcher {
+		if !matcher.Match(domain) {
+			return false
+		}
+	}
+	return true
+}
+
+func (al *AttributeList) IsEmpty() bool {
+	return len(al.matcher) == 0
+}
+
+func parseAttrs(attrs []string) *AttributeList {
+	al := new(AttributeList)
+	for _, attr := range attrs {
+		lc := strings.ToLower(attr)
+		al.matcher = append(al.matcher, BooleanMatcher(lc))
+	}
+	return al
 }
 
 func loadGeositeWithAttr(file string, siteWithAttr string) ([]*router.Domain, error) {
@@ -266,18 +347,13 @@ func loadGeositeWithAttr(file string, siteWithAttr string) ([]*router.Domain, er
 		return nil, errors.New("empty site")
 	}
 	country := strings.ToUpper(parts[0])
-	attrs := router.ParseAttrs(parts[1:])
+	attrs := parseAttrs(parts[1:])
 	domains, err := loadSite(file, country)
 	if err != nil {
 		return nil, err
 	}
 
 	if attrs.IsEmpty() {
-		return domains, nil
-	}
-
-	if runtime.GOOS != "windows" && runtime.GOOS != "wasm" {
-		domains[0].Value = domains[0].Value + "_" + strings.Join(parts[1:], ",")
 		return domains, nil
 	}
 
@@ -376,7 +452,7 @@ func ToCidrList(ips StringList) ([]*router.GeoIP, error) {
 			if len(country) == 0 {
 				return nil, errors.New("empty country name in rule")
 			}
-			geoip, err := loadGeoIP(strings.ToUpper(country))
+			geoip, err := loadIP("geoip.dat", strings.ToUpper(country))
 			if err != nil {
 				return nil, errors.New("failed to load GeoIP: ", country).Base(err)
 			}
@@ -430,7 +506,7 @@ func ToCidrList(ips StringList) ([]*router.GeoIP, error) {
 			continue
 		}
 
-		ipRule, err := ParseIP(ip)
+		ipRule, err := parseIP(ip)
 		if err != nil {
 			return nil, errors.New("invalid IP: ", ip).Base(err)
 		}
@@ -449,22 +525,22 @@ func ToCidrList(ips StringList) ([]*router.GeoIP, error) {
 func parseFieldRule(msg json.RawMessage) (*router.RoutingRule, error) {
 	type RawFieldRule struct {
 		RouterRule
-		Domain      *StringList       `json:"domain"`
-		Domains     *StringList       `json:"domains"`
-		IP          *StringList       `json:"ip"`
-		Port        *PortList         `json:"port"`
-		Network     *NetworkList      `json:"network"`
-		SourceIP    *StringList       `json:"sourceIP"`
-		Source      *StringList       `json:"source"`
-		SourcePort  *PortList         `json:"sourcePort"`
-		User        *StringList       `json:"user"`
-		VlessRoute  *PortList         `json:"vlessRoute"`
-		InboundTag  *StringList       `json:"inboundTag"`
-		Protocols   *StringList       `json:"protocol"`
-		Attributes  map[string]string `json:"attrs"`
-		LocalIP     *StringList       `json:"localIP"`
-		LocalPort   *PortList         `json:"localPort"`
-		ProcessName *StringList       `json:"processName"`
+		Domain     *StringList       `json:"domain"`
+		Domains    *StringList       `json:"domains"`
+		IP         *StringList       `json:"ip"`
+		Port       *PortList         `json:"port"`
+		Network    *NetworkList      `json:"network"`
+		SourceIP   *StringList       `json:"sourceIP"`
+		Source     *StringList       `json:"source"`
+		SourcePort *PortList         `json:"sourcePort"`
+		User       *StringList       `json:"user"`
+		VlessRoute *PortList         `json:"vlessRoute"`
+		InboundTag *StringList       `json:"inboundTag"`
+		Protocols  *StringList       `json:"protocol"`
+		Attributes map[string]string `json:"attrs"`
+		LocalIP    *StringList       `json:"localIP"`
+		LocalPort  *PortList         `json:"localPort"`
+		Process    *StringList       `json:"process"`
 	}
 	rawFieldRule := new(RawFieldRule)
 	err := json.Unmarshal(msg, rawFieldRule)
@@ -577,16 +653,14 @@ func parseFieldRule(msg json.RawMessage) (*router.RoutingRule, error) {
 		rule.Attributes = rawFieldRule.Attributes
 	}
 
-	if rawFieldRule.ProcessName != nil {
-		for _, s := range *rawFieldRule.ProcessName {
-			rule.ProcessName = append(rule.ProcessName, s)
-		}
+	if rawFieldRule.Process != nil && len(*rawFieldRule.Process) > 0 {
+		rule.Process = *rawFieldRule.Process
 	}
 
 	return rule, nil
 }
 
-func ParseRule(msg json.RawMessage) (*router.RoutingRule, error) {
+func parseRule(msg json.RawMessage) (*router.RoutingRule, error) {
 	rawRule := new(RouterRule)
 	err := json.Unmarshal(msg, rawRule)
 	if err != nil {
