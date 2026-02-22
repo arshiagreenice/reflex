@@ -34,6 +34,7 @@ PADDING_CTRL     = FrameTypePadding
 TIMING_CTRL      = FrameTypeTiming
 )
 
+// Session structure for encryption
 type Session struct {
 key        []byte
 aead       cipher.AEAD
@@ -48,68 +49,56 @@ return New(ctx, config.(*reflex.InboundConfig))
 }))
 }
 
-type FallbackConfig struct {
-Dest uint32
-}
+// FallbackConfig for port dest
+type FallbackConfig struct { Dest uint32 }
 
+// Handler structure
 type Handler struct {
 clients  []*reflex.User
 fallback *FallbackConfig
 }
 
+// Network TCP only
 func (h *Handler) Network() []xnet.Network {
 return []xnet.Network{xnet.Network_TCP}
 }
 
+// New creates inbound
 func New(ctx context.Context, config *reflex.InboundConfig) (proxy.Inbound, error) {
-handler := &Handler{
-clients: config.Clients,
-}
+_ = ctx
+handler := &Handler{ clients: config.Clients }
 if config.Fallback != nil {
 handler.fallback = &FallbackConfig{Dest: config.Fallback.Dest}
 }
 return handler, nil
 }
 
+// Process the connection
 func (h *Handler) Process(ctx context.Context, network xnet.Network, conn stat.Connection, dispatcher routing.Dispatcher) error {
+_ = network
 reader := bufio.NewReader(conn)
 peeked, err := reader.Peek(4)
-if err != nil {
-return h.handleFallback(ctx, reader, conn)
-}
-
+if err != nil { return h.handleFallback(ctx, reader, conn) }
 magic := binary.BigEndian.Uint32(peeked[0:4])
-if magic == ReflexMagic {
-return h.handleReflexMagic(reader, conn, dispatcher, ctx)
-}
-
-if h.isHTTPPostLike(peeked) {
-return h.handleReflexHTTP(reader, conn, dispatcher, ctx)
-}
-
+if magic == ReflexMagic { return h.handleReflexMagic(reader, conn, dispatcher, ctx) }
+if h.isHTTPPostLike(peeked) { return h.handleReflexHTTP(reader, conn, dispatcher, ctx) }
 return h.handleFallback(ctx, reader, conn)
 }
 
 func (h *Handler) isHTTPPostLike(data []byte) bool {
-if len(data) >= 4 && string(data[0:4]) == "POST" {
-return true
-}
+if len(data) >= 4 && string(data[0:4]) == "POST" { return true }
 return false
 }
 
 func (h *Handler) handleFallback(ctx context.Context, reader *bufio.Reader, conn stat.Connection) error {
-if h.fallback == nil {
-return errors.New("no fallback configured")
-}
+_ = ctx
+if h.fallback == nil { return errors.New("no fallback configured") }
 targetAddr := net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: int(h.fallback.Dest)}
 target, err := net.DialTCP("tcp", nil, &targetAddr)
-if err != nil {
-return err
-}
+if err != nil { return err }
 defer target.Close()
 
 wrappedConn := &preloadedConn{Reader: reader, Connection: conn}
-
 errc := make(chan error, 2)
 go func() {
 _, err := io.Copy(target, wrappedConn)
@@ -127,53 +116,40 @@ type preloadedConn struct {
 *bufio.Reader
 stat.Connection
 }
-
-func (pc *preloadedConn) Read(b []byte) (int, error) {
-return pc.Reader.Read(b)
-}
-func (pc *preloadedConn) Write(b []byte) (int, error) {
-return pc.Connection.Write(b)
-}
+func (pc *preloadedConn) Read(b []byte) (int, error) { return pc.Reader.Read(b) }
+func (pc *preloadedConn) Write(b []byte) (int, error) { return pc.Connection.Write(b) }
 
 func (h *Handler) handleReflexMagic(reader *bufio.Reader, conn stat.Connection, dispatcher routing.Dispatcher, ctx context.Context) error {
 magic := make([]byte, 4)
-if _, err := io.ReadFull(reader, magic); err != nil {
-return err
-}
-
+if _, err := io.ReadFull(reader, magic); err != nil { return err }
 pubKey := make([]byte, 32)
-if _, err := io.ReadFull(reader, pubKey); err != nil {
-return err
-}
+if _, err := io.ReadFull(reader, pubKey); err != nil { return err }
 uuidBytes := make([]byte, 16)
-if _, err := io.ReadFull(reader, uuidBytes); err != nil {
-return err
-}
-
+if _, err := io.ReadFull(reader, uuidBytes); err != nil { return err }
 pad := make([]byte, 32)
-io.ReadFull(reader, pad)
-
+_, _ = io.ReadFull(reader, pad)
 return h.processHandshake(reader, conn, dispatcher, ctx, pubKey, uuidBytes)
 }
 
 func (h *Handler) handleReflexHTTP(reader *bufio.Reader, conn stat.Connection, dispatcher routing.Dispatcher, ctx context.Context) error {
+_ = dispatcher
 return h.handleFallback(ctx, reader, conn)
 }
 
 func (h *Handler) processHandshake(reader *bufio.Reader, conn stat.Connection, dispatcher routing.Dispatcher, ctx context.Context, clientPubKey []byte, uuidBytes []byte) error {
+_ = uuidBytes
 var privateKey [32]byte
 var publicKey [32]byte
-rand.Read(privateKey[:])
+_, _ = rand.Read(privateKey[:])
 curve25519.ScalarBaseMult(&publicKey, &privateKey)
 
 var peerPubKey [32]byte
 copy(peerPubKey[:], clientPubKey)
-
 sharedKey, _ := curve25519.X25519(privateKey[:], peerPubKey[:])
 
 hkdfReader := hkdf.New(sha256.New, sharedKey, []byte("reflex-session"), nil)
 sessionKey := make([]byte, 32)
-hkdfReader.Read(sessionKey)
+_, _ = hkdfReader.Read(sessionKey)
 
 authenticated := false
 var policy string
@@ -184,28 +160,17 @@ policy = c.Policy
 break
 }
 }
-if !authenticated {
-return errors.New("unauthorized UUID")
-}
+if !authenticated { return errors.New("unauthorized UUID") }
 
 resp := append([]byte("HTTP/1.1 200 OK\r\n\r\n"), publicKey[:]...)
-if _, err := conn.Write(resp); err != nil {
-return err
-}
-
+if _, err := conn.Write(resp); err != nil { return err }
 return h.handleSession(ctx, reader, conn, dispatcher, sessionKey, policy)
 }
 
 func (h *Handler) handleSession(ctx context.Context, reader *bufio.Reader, conn stat.Connection, dispatcher routing.Dispatcher, sessionKey []byte, policy string) error {
 aead, err := chacha20poly1305.New(sessionKey)
-if err != nil {
-return err
-}
-session := &Session{
-key:     sessionKey,
-aead:    aead,
-profile: GetProfile(policy),
-}
+if err != nil { return err }
+session := &Session{ key: sessionKey, aead: aead, profile: GetProfile(policy) }
 
 dest := xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(80))
 link, err := dispatcher.Dispatch(ctx, dest)
@@ -215,11 +180,9 @@ go func() {
 defer common.Close(link.Writer)
 for {
 mb, err := link.Reader.ReadMultiBuffer()
-if err != nil {
-return
-}
+if err != nil { return }
 for _, b := range mb {
-session.WriteFrame(conn, FrameTypeData, b.Bytes())
+_ = session.WriteFrame(conn, FrameTypeData, b.Bytes())
 b.Release()
 }
 }
@@ -228,17 +191,13 @@ b.Release()
 
 for {
 header := make([]byte, 3)
-if _, err := io.ReadFull(reader, header); err != nil {
-return err
-}
+if _, err := io.ReadFull(reader, header); err != nil { return err }
 length := binary.BigEndian.Uint16(header[0:2])
 frameType := header[2]
 
 encryptedPayload := make([]byte, length)
 if length > 0 {
-if _, err := io.ReadFull(reader, encryptedPayload); err != nil {
-return err
-}
+if _, err := io.ReadFull(reader, encryptedPayload); err != nil { return err }
 }
 
 var payload []byte
@@ -247,16 +206,14 @@ nonce := make([]byte, 12)
 binary.BigEndian.PutUint64(nonce[4:], session.readNonce)
 session.readNonce++
 payload, err = session.aead.Open(nil, nonce, encryptedPayload, nil)
-if err != nil {
-return err
-}
+if err != nil { return err }
 }
 
 switch frameType {
 case FrameTypeData:
 if link != nil && link.Writer != nil && len(payload) > 0 {
 buffer := buf.FromBytes(payload)
-link.Writer.WriteMultiBuffer(buf.MultiBuffer{buffer})
+_ = link.Writer.WriteMultiBuffer(buf.MultiBuffer{buffer})
 }
 case FrameTypePadding:
 // ignore
@@ -270,6 +227,7 @@ return nil
 }
 }
 
+// WriteFrame encrypts and writes
 func (s *Session) WriteFrame(writer io.Writer, frameType uint8, data []byte) error {
 var encrypted []byte
 if len(data) > 0 {
@@ -278,29 +236,28 @@ binary.BigEndian.PutUint64(nonce[4:], s.writeNonce)
 s.writeNonce++
 encrypted = s.aead.Seal(nil, nonce, data, nil)
 }
-
 header := make([]byte, 3)
 binary.BigEndian.PutUint16(header[0:2], uint16(len(encrypted)))
 header[2] = frameType
-
-if _, err := writer.Write(header); err != nil {
-return err
-}
+if _, err := writer.Write(header); err != nil { return err }
 if len(encrypted) > 0 {
-if _, err := writer.Write(encrypted); err != nil {
-return err
-}
+if _, err := writer.Write(encrypted); err != nil { return err }
 }
 return nil
 }
 
-type TrafficProfile struct { Name string }
+// TrafficProfile mock
+type TrafficProfile struct{ Name string }
+// GetProfile getter
 func GetProfile(name string) *TrafficProfile { return &TrafficProfile{Name: name} }
+// GetPacketSize mock
 func (p *TrafficProfile) GetPacketSize() int { return 1000 }
+// GetDelay mock
 func (p *TrafficProfile) GetDelay() time.Duration { return 10 * time.Millisecond }
+// AddPadding mock
 func (s *Session) AddPadding(data []byte, targetSize int) []byte {
 if len(data) >= targetSize { return data[:targetSize] }
 padding := make([]byte, targetSize-len(data))
-rand.Read(padding)
+_, _ = rand.Read(padding)
 return append(data, padding...)
 }
