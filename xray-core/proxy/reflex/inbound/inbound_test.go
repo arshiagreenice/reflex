@@ -1,4 +1,4 @@
-﻿package inbound
+package inbound
 import ( "testing"; "bytes" )
 func TestHandshakeMagic(t *testing.T) {}
 func TestKeyExchangeCurve25519(t *testing.T) {}

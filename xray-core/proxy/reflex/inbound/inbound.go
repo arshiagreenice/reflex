@@ -1,4 +1,4 @@
-﻿package inbound
+package inbound
 
 import (
 "bufio"
