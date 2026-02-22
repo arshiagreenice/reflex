@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/xtls/xray-core/common/errors"
-	"github.com/xtls/xray-core/common/platform"
 	"github.com/xtls/xray-core/common/platform/filesystem"
 	"github.com/xtls/xray-core/features/outbound"
 	"github.com/xtls/xray-core/features/routing"
+	"google.golang.org/protobuf/proto"
 )
 
 type Rule struct {
@@ -76,13 +76,19 @@ func (rr *RoutingRule) BuildCondition() (Condition, error) {
 	}
 
 	if len(rr.Geoip) > 0 {
-		cond, err := NewIPMatcher(rr.Geoip, MatcherAsType_Target)
+		geoip := rr.Geoip
+		if runtime.GOOS != "windows" && runtime.GOOS != "wasm" {
+			var err error
+			geoip, err = getGeoIPList(rr.Geoip)
+			if err != nil {
+				return nil, errors.New("failed to build geoip from mmap").Base(err)
+			}
+		}
+		cond, err := NewIPMatcher(geoip, MatcherAsType_Target)
 		if err != nil {
 			return nil, err
 		}
 		conds.Add(cond)
-		rr.Geoip = nil
-		runtime.GC()
 	}
 
 	if len(rr.SourceGeoip) > 0 {
@@ -91,8 +97,6 @@ func (rr *RoutingRule) BuildCondition() (Condition, error) {
 			return nil, err
 		}
 		conds.Add(cond)
-		rr.SourceGeoip = nil
-		runtime.GC()
 	}
 
 	if len(rr.LocalGeoip) > 0 {
@@ -102,37 +106,32 @@ func (rr *RoutingRule) BuildCondition() (Condition, error) {
 		}
 		conds.Add(cond)
 		errors.LogWarning(context.Background(), "Due to some limitations, in UDP connections, localIP is always equal to listen interface IP, so \"localIP\" rule condition does not work properly on UDP inbound connections that listen on all interfaces")
-		rr.LocalGeoip = nil
-		runtime.GC()
 	}
 
 	if len(rr.Domain) > 0 {
-		var matcher *DomainMatcher
-		var err error
-		// Check if domain matcher cache is provided via environment
-		domainMatcherPath := platform.NewEnvFlag(platform.MphCachePath).GetValue(func() string { return "" })
-
-		if domainMatcherPath != "" {
-			matcher, err = GetDomainMatcherWithRuleTag(domainMatcherPath, rr.RuleTag)
+		domains := rr.Domain
+		if runtime.GOOS != "windows" && runtime.GOOS != "wasm" {
+			var err error
+			domains, err = getDomainList(rr.Domain)
 			if err != nil {
-				return nil, errors.New("failed to build domain condition from cached MphDomainMatcher").Base(err)
+				return nil, errors.New("failed to build domains from mmap").Base(err)
 			}
-			errors.LogDebug(context.Background(), "MphDomainMatcher loaded from cache for ", rr.RuleTag, " rule tag)")
-
-		} else {
-			matcher, err = NewMphMatcherGroup(rr.Domain)
-			if err != nil {
-				return nil, errors.New("failed to build domain condition with MphDomainMatcher").Base(err)
-			}
-			errors.LogDebug(context.Background(), "MphDomainMatcher is enabled for ", len(rr.Domain), " domain rule(s)")
 		}
+
+		matcher, err := NewMphMatcherGroup(domains)
+		if err != nil {
+			return nil, errors.New("failed to build domain condition with MphDomainMatcher").Base(err)
+		}
+		errors.LogDebug(context.Background(), "MphDomainMatcher is enabled for ", len(rr.Domain), " domain rule(s)")
 		conds.Add(matcher)
-		rr.Domain = nil
-		runtime.GC()
 	}
 
-	if len(rr.Process) > 0 {
-		conds.Add(NewProcessNameMatcher(rr.Process))
+	if len(rr.ProcessName) > 0 {
+		refinedNames := make([]string, 0, len(rr.ProcessName))
+		for _, name := range rr.ProcessName {
+			refinedNames = append(refinedNames, strings.TrimSuffix(name, ".exe"))
+		}
+		conds.Add(&ProcessNameMatcher{refinedNames})
 	}
 
 	if conds.Len() == 0 {
@@ -189,19 +188,79 @@ func (br *BalancingRule) Build(ohm outbound.Manager, dispatcher routing.Dispatch
 	}
 }
 
-func GetDomainMatcherWithRuleTag(domainMatcherPath string, ruleTag string) (*DomainMatcher, error) {
-	f, err := filesystem.NewFileReader(domainMatcherPath)
-	if err != nil {
-		return nil, errors.New("failed to load file: ", domainMatcherPath).Base(err)
-	}
-	defer f.Close()
+func getGeoIPList(ips []*GeoIP) ([]*GeoIP, error) {
+	geoipList := []*GeoIP{}
+	for _, ip := range ips {
+		if ip.CountryCode != "" {
+			val := strings.Split(ip.CountryCode, "_")
+			fileName := "geoip.dat"
+			if len(val) == 2 {
+				fileName = strings.ToLower(val[0])
+			}
+			bs, err := filesystem.ReadAsset(fileName)
+			if err != nil {
+				return nil, errors.New("failed to load file: ", fileName).Base(err)
+			}
+			bs = filesystem.Find(bs, []byte(ip.CountryCode))
 
-	g, err := LoadGeoSiteMatcher(f, ruleTag)
-	if err != nil {
-		return nil, errors.New("failed to load file:", domainMatcherPath).Base(err)
-	}
-	return &DomainMatcher{
-		Matchers: g,
-	}, nil
+			var geoip GeoIP
 
+			if err := proto.Unmarshal(bs, &geoip); err != nil {
+				return nil, errors.New("failed Unmarshal :").Base(err)
+			}
+			geoipList = append(geoipList, &geoip)
+
+		} else {
+			geoipList = append(geoipList, ip)
+		}
+	}
+	return geoipList, nil
+
+}
+
+func getDomainList(domains []*Domain) ([]*Domain, error) {
+	domainList := []*Domain{}
+	for _, domain := range domains {
+		val := strings.Split(domain.Value, "_")
+
+		if len(val) >= 2 {
+
+			fileName := val[0]
+			code := val[1]
+
+			bs, err := filesystem.ReadAsset(fileName)
+			if err != nil {
+				return nil, errors.New("failed to load file: ", fileName).Base(err)
+			}
+			bs = filesystem.Find(bs, []byte(code))
+			var geosite GeoSite
+
+			if err := proto.Unmarshal(bs, &geosite); err != nil {
+				return nil, errors.New("failed Unmarshal :").Base(err)
+			}
+
+			// parse attr
+			if len(val) == 3 {
+				siteWithAttr := strings.Split(val[2], ",")
+				attrs := ParseAttrs(siteWithAttr)
+
+				if !attrs.IsEmpty() {
+					filteredDomains := make([]*Domain, 0, len(domains))
+					for _, domain := range geosite.Domain {
+						if attrs.Match(domain) {
+							filteredDomains = append(filteredDomains, domain)
+						}
+					}
+					geosite.Domain = filteredDomains
+				}
+
+			}
+
+			domainList = append(domainList, geosite.Domain...)
+
+		} else {
+			domainList = append(domainList, domain)
+		}
+	}
+	return domainList, nil
 }

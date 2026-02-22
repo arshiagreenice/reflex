@@ -822,8 +822,7 @@ func (f *GeoIPSetFactory) Create(cidrGroups ...[]*CIDR) (*GeoIPSet, error) {
 	var ipv4Builder, ipv6Builder netipx.IPSetBuilder
 
 	for _, cidrGroup := range cidrGroups {
-		for i, cidrEntry := range cidrGroup {
-			cidrGroup[i] = nil
+		for _, cidrEntry := range cidrGroup {
 			ipBytes := cidrEntry.GetIp()
 			prefixLen := int(cidrEntry.GetPrefix())
 

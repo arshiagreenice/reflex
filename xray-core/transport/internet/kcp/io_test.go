@@ -7,7 +7,9 @@ import (
 )
 
 func TestKCPPacketReader(t *testing.T) {
-	reader := KCPPacketReader{}
+	reader := KCPPacketReader{
+		Security: &SimpleAuthenticator{},
+	}
 
 	testCases := []struct {
 		Input  []byte

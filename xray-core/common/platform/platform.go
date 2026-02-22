@@ -22,10 +22,6 @@ const (
 	BrowserDialerAddress = "xray.browser.dialer"
 	XUDPLog              = "xray.xudp.show"
 	XUDPBaseKey          = "xray.xudp.basekey"
-
-	TunFdKey = "xray.tun.fd"
-
-	MphCachePath = "xray.mph.cache"
 )
 
 type EnvFlag struct {

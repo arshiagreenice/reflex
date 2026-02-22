@@ -64,11 +64,7 @@ func GetMergedConfig(args cmdarg.Arg) (string, error) {
 	var files []*ConfigSource
 	supported := []string{"json", "yaml", "toml"}
 	for _, file := range args {
-		format := "json"
-		if file != "stdin:" {
-			format = GetFormat(file)
-		}
-
+		format := GetFormat(file)
 		if slices.Contains(supported, format) {
 			files = append(files, &ConfigSource{
 				Name:   file,

@@ -8,7 +8,7 @@ func TestEncryptChaCha20AEAD(t *testing.T) {}
 func TestReadFrameWriteFrame(t *testing.T) {
 s := &Session{}
 var buf bytes.Buffer
-s.WriteFrame(&buf, FrameTypeData, nil)
+_ = s.WriteFrame(&buf, FrameTypeData, nil)
 }
 func TestReplayProtection(t *testing.T) {}
 func TestFallbackPeek(t *testing.T) {}
@@ -25,4 +25,3 @@ s.AddPadding([]byte("test"), 10)
 func TestIntegrationFullHandshake(t *testing.T) {}
 func TestIntegrationFallback(t *testing.T) {}
 func TestIntegrationReplayAttack(t *testing.T) {}
-

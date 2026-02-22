@@ -6,7 +6,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/asn1"
 	"encoding/pem"
@@ -88,10 +87,10 @@ func Organization(org string) Option {
 	}
 }
 
-func MustGenerate(parent *Certificate, opts ...Option) (*Certificate, [32]byte) {
+func MustGenerate(parent *Certificate, opts ...Option) *Certificate {
 	cert, err := Generate(parent, opts...)
 	common.Must(err)
-	return cert, sha256.Sum256(cert.Certificate)
+	return cert
 }
 
 func publicKey(priv interface{}) interface{} {

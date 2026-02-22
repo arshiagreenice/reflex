@@ -126,10 +126,6 @@ func UClient(c net.Conn, config *tls.Config, fingerprint *utls.ClientHelloID) ne
 	return &UConn{UConn: utlsConn}
 }
 
-func GeneraticUClient(c net.Conn, config *tls.Config) *utls.UConn {
-	return utls.UClient(c, copyConfig(config), utls.HelloChrome_Auto)
-}
-
 func copyConfig(c *tls.Config) *utls.Config {
 	return &utls.Config{
 		Rand:                           c.Rand,

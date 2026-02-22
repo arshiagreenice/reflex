@@ -58,14 +58,12 @@ func (c *VMessDefaultConfig) Build() *inbound.DefaultConfig {
 }
 
 type VMessInboundConfig struct {
-	Users    []json.RawMessage   `json:"clients"`
-	Defaults *VMessDefaultConfig `json:"default"`
+	Users        []json.RawMessage   `json:"clients"`
+	Defaults     *VMessDefaultConfig `json:"default"`
 }
 
 // Build implements Buildable
 func (c *VMessInboundConfig) Build() (proto.Message, error) {
-	errors.PrintNonRemovalDeprecatedFeatureWarning("VMess (with no Forward Secrecy, etc.)", "VLESS Encryption")
-
 	config := &inbound.Config{}
 
 	if c.Defaults != nil {
@@ -115,8 +113,6 @@ type VMessOutboundConfig struct {
 
 // Build implements Buildable
 func (c *VMessOutboundConfig) Build() (proto.Message, error) {
-	errors.PrintNonRemovalDeprecatedFeatureWarning("VMess (with no Forward Secrecy, etc.)", "VLESS Encryption")
-
 	config := new(outbound.Config)
 	if c.Address != nil {
 		c.Receivers = []*VMessOutboundTarget{

@@ -15,7 +15,6 @@ import (
 	"github.com/xtls/xray-core/common/session"
 	"github.com/xtls/xray-core/common/signal/done"
 	"github.com/xtls/xray-core/common/task"
-	"github.com/xtls/xray-core/common/utils"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/extension"
 	"github.com/xtls/xray-core/features/outbound"
@@ -163,9 +162,7 @@ func (o *Observer) probe(outbound string) ProbeResult {
 		if o.config.ProbeUrl != "" {
 			probeURL = o.config.ProbeUrl
 		}
-		req, _ := http.NewRequest(http.MethodGet, probeURL, nil)
-		req.Header.Set("User-Agent", utils.ChromeUA)
-		response, err := httpClient.Do(req)
+		response, err := httpClient.Get(probeURL)
 		if err != nil {
 			return errors.New("outbound failed to relay connection").Base(err)
 		}

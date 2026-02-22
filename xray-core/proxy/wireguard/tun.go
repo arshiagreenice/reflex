@@ -173,7 +173,7 @@ func createGVisorTun(localAddresses []netip.Addr, mtu int, handler promiscuousMo
 		})
 		stack.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpForwarder.HandlePacket)
 
-		udpForwarder := udp.NewForwarder(stack, func(r *udp.ForwarderRequest) bool {
+		udpForwarder := udp.NewForwarder(stack, func(r *udp.ForwarderRequest) {
 			go func(r *udp.ForwarderRequest) {
 				var (
 					wq waiter.Queue
@@ -195,8 +195,6 @@ func createGVisorTun(localAddresses []netip.Addr, mtu int, handler promiscuousMo
 
 				handler(net.UDPDestination(net.IPAddress(id.LocalAddress.AsSlice()), net.Port(id.LocalPort)), gonet.NewUDPConn(&wq, ep))
 			}(r)
-
-			return true
 		})
 		stack.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
 	}

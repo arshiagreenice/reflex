@@ -15,10 +15,8 @@ return New(ctx, config.(*reflex.OutboundConfig))
 }))
 }
 
-// Handler handles outbound
 type Handler struct{ config *reflex.OutboundConfig }
 
-// Process processes traffic
 func (h *Handler) Process(ctx context.Context, link *transport.Link, d internet.Dialer) error {
 _ = ctx
 _ = d
@@ -27,8 +25,8 @@ _ = link.Writer
 return nil
 }
 
-// New creates outbound
-func New(ctx context.Context, config *reflex.OutboundConfig) (proxy.Outbound, error) {
+// NOTE: Using proxy.OutboundHandler for older Xray-core
+func New(ctx context.Context, config *reflex.OutboundConfig) (proxy.OutboundHandler, error) {
 _ = ctx
 return &Handler{config: config}, nil
 }

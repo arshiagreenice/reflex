@@ -123,8 +123,6 @@ func Test_listenWSAndDial_TLS(t *testing.T) {
 
 	start := time.Now()
 
-	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
-
 	streamSettings := &internet.MemoryStreamConfig{
 		ProtocolName: "websocket",
 		ProtocolSettings: &Config{
@@ -132,8 +130,8 @@ func Test_listenWSAndDial_TLS(t *testing.T) {
 		},
 		SecurityType: "tls",
 		SecuritySettings: &tls.Config{
-			Certificate:          []*tls.Certificate{tls.ParseCertificate(ct)},
-			PinnedPeerCertSha256: [][]byte{ctHash[:]},
+			AllowInsecure: true,
+			Certificate:   []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil, cert.CommonName("localhost")))},
 		},
 	}
 	listen, err := ListenWS(context.Background(), net.LocalHostIP, listenPort, streamSettings, func(conn stat.Connection) {

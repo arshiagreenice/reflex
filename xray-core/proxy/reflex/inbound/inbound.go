@@ -34,7 +34,6 @@ PADDING_CTRL     = FrameTypePadding
 TIMING_CTRL      = FrameTypeTiming
 )
 
-// Session structure for encryption
 type Session struct {
 key        []byte
 aead       cipher.AEAD
@@ -49,22 +48,19 @@ return New(ctx, config.(*reflex.InboundConfig))
 }))
 }
 
-// FallbackConfig for port dest
 type FallbackConfig struct { Dest uint32 }
 
-// Handler structure
 type Handler struct {
 clients  []*reflex.User
 fallback *FallbackConfig
 }
 
-// Network TCP only
 func (h *Handler) Network() []xnet.Network {
 return []xnet.Network{xnet.Network_TCP}
 }
 
-// New creates inbound
-func New(ctx context.Context, config *reflex.InboundConfig) (proxy.Inbound, error) {
+// NOTE: Using proxy.InboundHandler for the older Xray-core
+func New(ctx context.Context, config *reflex.InboundConfig) (proxy.InboundHandler, error) {
 _ = ctx
 handler := &Handler{ clients: config.Clients }
 if config.Fallback != nil {
@@ -73,7 +69,6 @@ handler.fallback = &FallbackConfig{Dest: config.Fallback.Dest}
 return handler, nil
 }
 
-// Process the connection
 func (h *Handler) Process(ctx context.Context, network xnet.Network, conn stat.Connection, dispatcher routing.Dispatcher) error {
 _ = network
 reader := bufio.NewReader(conn)
@@ -177,7 +172,6 @@ link, err := dispatcher.Dispatch(ctx, dest)
 
 if err == nil && link != nil {
 go func() {
-defer common.Close(link.Writer)
 for {
 mb, err := link.Reader.ReadMultiBuffer()
 if err != nil { return }
@@ -216,9 +210,7 @@ buffer := buf.FromBytes(payload)
 _ = link.Writer.WriteMultiBuffer(buf.MultiBuffer{buffer})
 }
 case FrameTypePadding:
-// ignore
 case FrameTypeTiming:
-// ignore
 case FrameTypeClose:
 return nil
 default:
@@ -227,7 +219,6 @@ return nil
 }
 }
 
-// WriteFrame encrypts and writes
 func (s *Session) WriteFrame(writer io.Writer, frameType uint8, data []byte) error {
 var encrypted []byte
 if len(data) > 0 {
@@ -246,15 +237,10 @@ if _, err := writer.Write(encrypted); err != nil { return err }
 return nil
 }
 
-// TrafficProfile mock
 type TrafficProfile struct{ Name string }
-// GetProfile getter
 func GetProfile(name string) *TrafficProfile { return &TrafficProfile{Name: name} }
-// GetPacketSize mock
 func (p *TrafficProfile) GetPacketSize() int { return 1000 }
-// GetDelay mock
 func (p *TrafficProfile) GetDelay() time.Duration { return 10 * time.Millisecond }
-// AddPadding mock
 func (s *Session) AddPadding(data []byte, targetSize int) []byte {
 if len(data) >= targetSize { return data[:targetSize] }
 padding := make([]byte, targetSize-len(data))

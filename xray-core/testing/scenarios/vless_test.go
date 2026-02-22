@@ -97,7 +97,7 @@ func TestVless(t *testing.T) {
 					Vnext: &protocol.ServerEndpoint{
 						Address: net.NewIPOrDomain(net.LocalHostIP),
 						Port:    uint32(serverPort),
-						User: &protocol.User{
+						User:    &protocol.User{
 							Account: serial.ToTypedMessage(&vless.Account{
 								Id: userID.String(),
 							}),
@@ -129,8 +129,6 @@ func TestVlessTls(t *testing.T) {
 	common.Must(err)
 	defer tcpServer.Close()
 
-	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
-
 	userID := protocol.NewID(uuid.New())
 	serverPort := tcp.PickPort()
 	serverConfig := &core.Config{
@@ -150,7 +148,7 @@ func TestVlessTls(t *testing.T) {
 						SecurityType: serial.GetMessageType(&tls.Config{}),
 						SecuritySettings: []*serial.TypedMessage{
 							serial.ToTypedMessage(&tls.Config{
-								Certificate: []*tls.Certificate{tls.ParseCertificate(ct)},
+								Certificate: []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil))},
 							}),
 						},
 					},
@@ -200,7 +198,7 @@ func TestVlessTls(t *testing.T) {
 					Vnext: &protocol.ServerEndpoint{
 						Address: net.NewIPOrDomain(net.LocalHostIP),
 						Port:    uint32(serverPort),
-						User: &protocol.User{
+						User:    &protocol.User{
 							Account: serial.ToTypedMessage(&vless.Account{
 								Id: userID.String(),
 							}),
@@ -219,7 +217,7 @@ func TestVlessTls(t *testing.T) {
 						SecurityType: serial.GetMessageType(&tls.Config{}),
 						SecuritySettings: []*serial.TypedMessage{
 							serial.ToTypedMessage(&tls.Config{
-								PinnedPeerCertSha256: [][]byte{ctHash[:]},
+								AllowInsecure: true,
 							}),
 						},
 					},
@@ -249,8 +247,6 @@ func TestVlessXtlsVision(t *testing.T) {
 	common.Must(err)
 	defer tcpServer.Close()
 
-	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
-
 	userID := protocol.NewID(uuid.New())
 	serverPort := tcp.PickPort()
 	serverConfig := &core.Config{
@@ -270,7 +266,7 @@ func TestVlessXtlsVision(t *testing.T) {
 						SecurityType: serial.GetMessageType(&tls.Config{}),
 						SecuritySettings: []*serial.TypedMessage{
 							serial.ToTypedMessage(&tls.Config{
-								Certificate: []*tls.Certificate{tls.ParseCertificate(ct)},
+								Certificate: []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil))},
 							}),
 						},
 					},
@@ -321,7 +317,7 @@ func TestVlessXtlsVision(t *testing.T) {
 					Vnext: &protocol.ServerEndpoint{
 						Address: net.NewIPOrDomain(net.LocalHostIP),
 						Port:    uint32(serverPort),
-						User: &protocol.User{
+						User:    &protocol.User{
 							Account: serial.ToTypedMessage(&vless.Account{
 								Id:   userID.String(),
 								Flow: vless.XRV,
@@ -341,7 +337,7 @@ func TestVlessXtlsVision(t *testing.T) {
 						SecurityType: serial.GetMessageType(&tls.Config{}),
 						SecuritySettings: []*serial.TypedMessage{
 							serial.ToTypedMessage(&tls.Config{
-								PinnedPeerCertSha256: [][]byte{ctHash[:]},
+								AllowInsecure: true,
 							}),
 						},
 					},
@@ -451,7 +447,7 @@ func TestVlessXtlsVisionReality(t *testing.T) {
 					Vnext: &protocol.ServerEndpoint{
 						Address: net.NewIPOrDomain(net.LocalHostIP),
 						Port:    uint32(serverPort),
-						User: &protocol.User{
+						User:    &protocol.User{
 							Account: serial.ToTypedMessage(&vless.Account{
 								Id:   userID.String(),
 								Flow: vless.XRV,
